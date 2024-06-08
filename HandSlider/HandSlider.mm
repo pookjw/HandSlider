@@ -13,6 +13,8 @@ __attribute__((objc_direct_members))
 @interface HandSlider ()
 @property (retain, nonatomic, readonly) ar_session_t session;
 @property (retain, nonatomic, readonly) ar_hand_tracking_provider_t handTrackingProvider;
+@property (assign, nonatomic) float startValue;
+@property (assign, nonatomic) BOOL isAdjusting;
 @end
 
 @implementation HandSlider
@@ -46,6 +48,8 @@ __attribute__((objc_direct_members))
 }
 
 - (void)commonInit_HandSlider __attribute__((objc_direct)) {
+    self.startValue = 0.f;
+    self.isAdjusting = NO;
     self.minimumValue = 0.f;
     self.maximumValue = M_PI_2;
     
@@ -125,21 +129,34 @@ __attribute__((objc_direct_members))
     ar_release(configuration);
     
     ar_hand_tracking_provider_set_update_handler(handTrackingProvider, NULL, ^(ar_hand_anchor_t  _Nonnull hand_anchor_left, ar_hand_anchor_t  _Nonnull hand_anchor_right) {
-//        ar_skeleton_joint_t joint = ar_hand_skeleton_get_joint_named(ar_hand_anchor_get_hand_skeleton(hand_anchor_right), ar_hand_skeleton_joint_name_wrist);
+        __block float meanAngle = 0.f;
         
-//        ar_hand_skeleton_enumerate_joints(ar_hand_anchor_get_hand_skeleton(hand_anchor_right), ^bool(ar_skeleton_joint_t  _Nonnull joint) {
-//            simd_float4x4 matrix = ar_skeleton_joint_get_anchor_from_joint_transform(joint);
-//            simd_quatf rotation = simd_quaternion(matrix);
-//            float angle = simd_angle(rotation);
-//            NSLog(@"%lf", angle);
-//            
-//            return true;
-//        });
+        ar_hand_skeleton_t rightHandSkeleton = ar_hand_anchor_get_hand_skeleton(hand_anchor_right);
         
-        simd_float4x4 matrix = ar_anchor_get_origin_from_anchor_transform(hand_anchor_right);
-        simd_quatf rotation = simd_quaternion(matrix);
-        float angle = simd_angle(rotation);
-        self.value = angle;
+        ar_hand_skeleton_enumerate_joints(rightHandSkeleton, ^bool(ar_skeleton_joint_t  _Nonnull joint) {
+            simd_float4x4 matrix = ar_skeleton_joint_get_parent_from_joint_transform(joint);
+            simd_quatf rotation = simd_quaternion(matrix);
+            meanAngle += simd_angle(rotation);
+            
+            return true;
+        });
+        
+        meanAngle /= (float)ar_hand_skeleton_get_joint_count(rightHandSkeleton);
+        
+        if (meanAngle >= M_PI / 6.f) {
+            simd_float4x4 matrix = ar_anchor_get_origin_from_anchor_transform(hand_anchor_right);
+            simd_quatf rotation = simd_quaternion(matrix);
+            float angle = simd_angle(rotation);
+            
+            if (!self.isAdjusting) {
+                self.startValue = angle;
+                self.isAdjusting = YES;
+            }
+            
+            self.value += (angle - self.startValue) / 10.f;
+        } else {
+            self.isAdjusting = NO;
+        }
     });
     
     _handTrackingProvider = ar_retain(handTrackingProvider);
